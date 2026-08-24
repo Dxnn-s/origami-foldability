@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { analyze, normalizeDeg, sortedCreases, type Assignment, type Crease } from "./foldability";
+import { FoldCanvas } from "./fold3d";
+import { Reveal, useScrollProgress } from "./scroll";
 
 const SIZE = 380;
 const CX = SIZE / 2;
@@ -23,9 +25,10 @@ function wedgePath(a0: number, a1: number): string {
   return "M " + pts.join(" L ") + " Z";
 }
 
-const PRESETS: { label: string; creases: Crease[] }[] = [
+const PRESETS: { label: string; note: string; creases: Crease[] }[] = [
   {
-    label: "Square (MMMV)",
+    label: "Square · MMMV",
+    note: "folds flat",
     creases: [
       { angle: 0, assignment: "M" },
       { angle: 90, assignment: "M" },
@@ -34,7 +37,8 @@ const PRESETS: { label: string; creases: Crease[] }[] = [
     ],
   },
   {
-    label: "Square (MVMV — Maekawa fails)",
+    label: "Square · MVMV",
+    note: "Maekawa fails",
     creases: [
       { angle: 0, assignment: "M" },
       { angle: 90, assignment: "V" },
@@ -43,59 +47,14 @@ const PRESETS: { label: string; creases: Crease[] }[] = [
     ],
   },
   {
-    label: "6-crease foldable",
-    creases: [0, 30, 90, 180, 270, 330].map((a) => ({ angle: a, assignment: null })),
+    label: "Six creases",
+    note: "Kawasaki holds",
+    creases: [0, 30, 90, 180, 270, 330].map((a) => ({ angle: a, assignment: null as Assignment })),
   },
   {
-    label: "Not Kawasaki",
-    creases: [0, 60, 180, 240].map((a) => ({ angle: a, assignment: null })),
-  },
-];
-
-type HighlightTarget = "pattern" | "verdict" | "creases" | null;
-
-const TOUR_STEPS: {
-  title: string;
-  body: string;
-  preset?: Crease[];
-  highlight?: HighlightTarget;
-}[] = [
-  {
-    title: "Welcome",
-    body: "This tool checks whether a single-vertex origami crease pattern can fold flat. Six quick steps and you will know how to drive it.",
-  },
-  {
-    title: "The vertex and its creases",
-    body: "Every line runs from the center vertex out to the edge: that is a crease. The angle between two neighboring creases is a sector (labeled in degrees). Here is a simple 4-crease square.",
-    preset: PRESETS[0].creases,
-    highlight: "pattern",
-  },
-  {
-    title: "Kawasaki's theorem",
-    body: "A vertex can fold flat only if it has an even number of creases AND the alternating sum of sectors is zero (odd-position and even-position sectors each total 180 degrees). Watch the Kawasaki chip in the verdict.",
-    highlight: "verdict",
-  },
-  {
-    title: "When Kawasaki fails",
-    body: "These sectors do not alternate to zero, so Kawasaki fails: this vertex cannot fold flat no matter how you fold it. The verdict explains exactly why.",
-    preset: PRESETS[3].creases,
-    highlight: "verdict",
-  },
-  {
-    title: "Add your own crease",
-    body: "Click anywhere on the disc to add a crease (angles snap to 1 degree). Try adding one or two now: the verdict updates instantly.",
-    highlight: "pattern",
-  },
-  {
-    title: "Mountain / Valley and Maekawa",
-    body: "Click a crease dot to cycle Mountain to Valley to unassigned, or use the M/V buttons in the list. Maekawa's theorem says a flat-foldable vertex needs |M - V| = 2. This MVMV square PASSES Kawasaki but FAILS Maekawa: a subtle non-foldable case.",
-    preset: PRESETS[1].creases,
-    highlight: "creases",
-  },
-  {
-    title: "Read the verdict",
-    body: "The verdict combines both theorems and spells out the reasoning. Green means the necessary conditions hold (layer ordering is future work, see Scope). That's it: explore freely.",
-    highlight: "verdict",
+    label: "Off-balance",
+    note: "not Kawasaki",
+    creases: [0, 60, 180, 240].map((a) => ({ angle: a, assignment: null as Assignment })),
   },
 ];
 
@@ -111,16 +70,9 @@ function cycle(a: Assignment): Assignment {
 
 export function App() {
   const [creases, setCreases] = useState<Crease[]>(PRESETS[0].creases);
-  const [tourStep, setTourStep] = useState<number | null>(null);
-
-  // When a tour step carries a preset, load it on entering that step.
-  useEffect(() => {
-    if (tourStep === null) return;
-    const preset = TOUR_STEPS[tourStep].preset;
-    if (preset) setCreases(preset);
-  }, [tourStep]);
-
-  const tourHighlight: HighlightTarget = tourStep !== null ? TOUR_STEPS[tourStep].highlight ?? null : null;
+  const [foldPct, setFoldPct] = useState(0);
+  const foldRef = useRef(0);
+  const scroll = useScrollProgress();
 
   const result = useMemo(() => {
     try {
@@ -161,6 +113,10 @@ export function App() {
   function remove(i: number) {
     setCreases((prev) => prev.filter((_, j) => j !== i));
   }
+  function setFold(v: number) {
+    foldRef.current = v / 100;
+    setFoldPct(v);
+  }
 
   // Sectors aligned to the sorted creases for shading + labels.
   const sortedAngles = ordered.map((c) => normalizeDeg(c.angle));
@@ -170,166 +126,268 @@ export function App() {
   });
 
   return (
-    <div className="app">
-      <header>
-        <h1>Flat-Foldability Analyzer</h1>
-        <p>
-          Build a single-vertex crease pattern and check whether it folds flat, using Kawasaki's
-          and Maekawa's theorems. Click the disc to add a crease; click a crease to cycle
-          mountain / valley / unassigned.
-        </p>
-        <button className="tour-start" onClick={() => setTourStep(0)}>
-          ▶ Guided tour
-        </button>
-      </header>
-
-      <div className="layout">
-        {/* ---- Pattern editor ---- */}
-        <div className={`card ${tourHighlight === "pattern" ? "tour-highlight" : ""}`}>
-          <h2>Crease pattern</h2>
-          <svg
-            className="pattern"
-            viewBox={`0 0 ${SIZE} ${SIZE}`}
-            onClick={handleSvgClick}
-            role="img"
-            aria-label="single-vertex crease pattern editor"
-          >
-            <circle cx={CX} cy={CY} r={R} fill="none" stroke="var(--border)" strokeWidth={1} />
-            {sectorSpans.map((s, i) => (
-              <path
-                key={`wedge-${i}`}
-                d={wedgePath(s.a0, s.a1)}
-                fill={i % 2 === 0 ? "rgba(245,158,11,0.06)" : "rgba(34,211,238,0.05)"}
-                stroke="none"
-              />
-            ))}
-            {sectorSpans.map((s, i) => {
-              const mid = (s.a0 + s.a1) / 2;
-              const [lx, ly] = toXY(mid, R * 0.62);
-              const span = +(s.a1 - s.a0).toFixed(1);
-              return (
-                <text
-                  key={`lbl-${i}`}
-                  x={lx}
-                  y={ly}
-                  fill="var(--muted)"
-                  fontSize="11"
-                  fontFamily="Geist Mono, monospace"
-                  textAnchor="middle"
-                  dominantBaseline="middle"
-                >
-                  {span}&deg;
-                </text>
-              );
-            })}
-            {ordered.map((c, i) => {
-              const a = normalizeDeg(c.angle);
-              const [ex, ey] = toXY(a);
-              const st = STYLE_FOR[c.assignment ?? "null"];
-              return (
-                <g key={`crease-${i}`}>
-                  <line
-                    x1={CX}
-                    y1={CY}
-                    x2={ex}
-                    y2={ey}
-                    stroke={st.stroke}
-                    strokeWidth={st.width}
-                    strokeDasharray={st.dash}
-                  />
-                  <circle
-                    cx={ex}
-                    cy={ey}
-                    r={7}
-                    fill="var(--surface-solid)"
-                    stroke={st.stroke}
-                    strokeWidth={2}
-                    style={{ cursor: "pointer" }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      // find this crease's index in the unsorted source array
-                      const srcIdx = creases.findIndex(
-                        (x) => normalizeDeg(x.angle) === a && x.assignment === c.assignment,
-                      );
-                      if (srcIdx >= 0) setAssignment(srcIdx, cycle(c.assignment));
-                    }}
-                  />
-                </g>
-              );
-            })}
-            <circle cx={CX} cy={CY} r={4} fill="var(--accent)" />
-          </svg>
-
-          <div className="legend">
-            <span>
-              <span className="swatch" style={{ borderTopColor: "var(--mountain)" }} /> Mountain
-            </span>
-            <span>
-              <span
-                className="swatch"
-                style={{ borderTopColor: "var(--valley)", borderTopStyle: "dashed" }}
-              />{" "}
-              Valley
-            </span>
-            <span>
-              <span
-                className="swatch"
-                style={{ borderTopColor: "var(--unassigned)", borderTopStyle: "dotted" }}
-              />{" "}
-              Unassigned
-            </span>
+    <div className="page">
+      {/* ============================ HERO ============================ */}
+      <section className="hero">
+        <div className="hero-canvas" style={{ transform: `translateY(${scroll * 90}px)`, opacity: 1 - scroll * 1.4 }}>
+          <FoldCanvas creases={PRESETS[0].creases} auto />
+        </div>
+        <span className="kanji" aria-hidden>折</span>
+        <div className="hero-copy">
+          <p className="eyebrow">Single-vertex origami · Kawasaki × Maekawa</p>
+          <h1>
+            When does a<br />
+            crease pattern
+            <br />
+            <em>fold flat?</em>
+          </h1>
+          <p className="lede">
+            Draw creases around a point, mark the mountains and valleys, and watch two classical
+            theorems decide whether the paper can collapse to a plane. The verdict is live; the fold
+            is real geometry.
+          </p>
+          <div className="hero-actions">
+            <a className="btn primary" href="#analyzer">
+              Open the analyzer
+            </a>
+            <a className="btn ghost" href="#theory">
+              How it works
+            </a>
           </div>
+        </div>
+        <div className="scroll-cue" style={{ opacity: 1 - scroll * 6 }}>
+          <span>scroll</span>
+          <span className="line" />
+        </div>
+      </section>
 
-          <div className="toolbar">
-            {PRESETS.map((p) => (
-              <button key={p.label} onClick={() => setCreases(p.creases)}>
-                {p.label}
-              </button>
-            ))}
-            <button className="ghost" onClick={() => setCreases([])}>
-              clear
+      {/* ============================ THESIS ============================ */}
+      <section className="strip" id="theory">
+        <Reveal as="p" className="section-kicker">
+          The question
+        </Reveal>
+        <Reveal as="h2" className="big-line" delay={80}>
+          A flat fold is a promise the geometry either keeps or breaks.
+        </Reveal>
+        <Reveal as="p" className="section-body" delay={140}>
+          Around one interior vertex, whether paper can fold flat is fully decided by two rules:
+          one about the angles between creases, one about how many fold each way. This tool checks
+          both, explains the reasoning line by line, and folds the result in 3D. Global,
+          multi-vertex flat-foldability is a different beast entirely: it's NP-hard, and out of
+          scope by design.
+        </Reveal>
+      </section>
+
+      {/* ============================ THE TWO THEOREMS ============================ */}
+      <section className="theorems">
+        <Reveal className="theorem">
+          <div className="theorem-index">01</div>
+          <h3>Kawasaki's theorem</h3>
+          <p>
+            Sweep around the vertex and label the sectors between creases. A vertex can fold flat
+            only if there's an <strong>even</strong> number of creases and the alternating sum of
+            sector angles is zero: odd-position and even-position sectors each total 180°.
+          </p>
+          <p className="theorem-formula">α₁ − α₂ + α₃ − α₄ + ⋯ = 0°</p>
+        </Reveal>
+        <Reveal className="theorem" delay={120}>
+          <div className="theorem-index">02</div>
+          <h3>Maekawa's theorem</h3>
+          <p>
+            Once every crease is assigned a fold direction, count them. A flat-foldable vertex
+            always has <strong>exactly two more</strong> of one kind than the other: the mountain
+            and valley counts differ by two, no matter the pattern.
+          </p>
+          <p className="theorem-formula">| M − V | = 2</p>
+        </Reveal>
+      </section>
+
+      {/* ============================ ANALYZER ============================ */}
+      <section className="analyzer" id="analyzer">
+        <Reveal as="p" className="section-kicker">
+          The analyzer
+        </Reveal>
+        <Reveal as="h2" className="big-line" delay={60}>
+          Build a vertex. Read the verdict. Fold it.
+        </Reveal>
+
+        <Reveal className="toolbar" delay={120}>
+          {PRESETS.map((p) => (
+            <button key={p.label} onClick={() => setCreases(p.creases)}>
+              {p.label}
+              <span className="preset-note">{p.note}</span>
             </button>
-          </div>
-          <p className="hint">Tip: angles snap to 1&deg; on click; fine-tune any crease below.</p>
+          ))}
+          <button className="ghost" onClick={() => setCreases([])}>
+            clear
+          </button>
+        </Reveal>
+
+        <div className="studio">
+          {/* ---- 2D crease editor ---- */}
+          <Reveal className="card editor" delay={60}>
+            <h4>Crease pattern</h4>
+            <svg
+              className="pattern"
+              viewBox={`0 0 ${SIZE} ${SIZE}`}
+              onClick={handleSvgClick}
+              role="img"
+              aria-label="single-vertex crease pattern editor"
+            >
+              <circle cx={CX} cy={CY} r={R} fill="none" stroke="var(--border)" strokeWidth={1} />
+              {sectorSpans.map((s, i) => (
+                <path
+                  key={`wedge-${i}`}
+                  d={wedgePath(s.a0, s.a1)}
+                  fill={i % 2 === 0 ? "rgba(245,158,11,0.06)" : "rgba(34,211,238,0.05)"}
+                  stroke="none"
+                />
+              ))}
+              {sectorSpans.map((s, i) => {
+                const mid = (s.a0 + s.a1) / 2;
+                const [lx, ly] = toXY(mid, R * 0.62);
+                const span = +(s.a1 - s.a0).toFixed(1);
+                return (
+                  <text
+                    key={`lbl-${i}`}
+                    x={lx}
+                    y={ly}
+                    fill="var(--muted)"
+                    fontSize="11"
+                    fontFamily="Geist Mono, monospace"
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                  >
+                    {span}&deg;
+                  </text>
+                );
+              })}
+              {ordered.map((c, i) => {
+                const a = normalizeDeg(c.angle);
+                const [ex, ey] = toXY(a);
+                const st = STYLE_FOR[c.assignment ?? "null"];
+                return (
+                  <g key={`crease-${i}`}>
+                    <line
+                      x1={CX}
+                      y1={CY}
+                      x2={ex}
+                      y2={ey}
+                      stroke={st.stroke}
+                      strokeWidth={st.width}
+                      strokeDasharray={st.dash}
+                    />
+                    <circle
+                      cx={ex}
+                      cy={ey}
+                      r={7}
+                      fill="var(--surface-solid)"
+                      stroke={st.stroke}
+                      strokeWidth={2}
+                      style={{ cursor: "pointer" }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const srcIdx = creases.findIndex(
+                          (x) => normalizeDeg(x.angle) === a && x.assignment === c.assignment,
+                        );
+                        if (srcIdx >= 0) setAssignment(srcIdx, cycle(c.assignment));
+                      }}
+                    />
+                  </g>
+                );
+              })}
+              <circle cx={CX} cy={CY} r={4} fill="var(--accent)" />
+            </svg>
+
+            <div className="legend">
+              <span>
+                <span className="swatch" style={{ borderTopColor: "var(--mountain)" }} /> Mountain
+              </span>
+              <span>
+                <span
+                  className="swatch"
+                  style={{ borderTopColor: "var(--valley)", borderTopStyle: "dashed" }}
+                />{" "}
+                Valley
+              </span>
+              <span>
+                <span
+                  className="swatch"
+                  style={{ borderTopColor: "var(--unassigned)", borderTopStyle: "dotted" }}
+                />{" "}
+                Unassigned
+              </span>
+            </div>
+            <p className="hint">Click the disc to add a crease · click a dot to cycle M / V / none</p>
+          </Reveal>
+
+          {/* ---- 3D fold ---- */}
+          <Reveal className="card fold" delay={120}>
+            <h4>Live fold · 3D</h4>
+            <div className="fold-stage">
+              {ordered.length >= 2 ? (
+                <FoldCanvas creases={creases} foldRef={foldRef} />
+              ) : (
+                <div className="fold-empty">Add at least two creases to fold.</div>
+              )}
+            </div>
+            <div className="fold-control">
+              <span className="fold-label">flat</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={foldPct}
+                onChange={(e) => setFold(+e.target.value)}
+                aria-label="fold amount"
+              />
+              <span className="fold-label">folded</span>
+            </div>
+            <p className="hint">
+              Drag to orbit · slide to fold. Mountains and valleys pleat in opposite directions.
+              This illustrates the fold; a certified layer ordering is future work (see scope).
+            </p>
+          </Reveal>
         </div>
 
-        {/* ---- Analysis + crease list ---- */}
-        <div>
-          <div className={`card ${tourHighlight === "verdict" ? "tour-highlight" : ""}`}>
-            <h2>Verdict</h2>
-            {result && creases.length >= 2 ? (
-              <>
-                <div className="verdict">
-                  <span className={`badge ${result.flatFoldable ? "yes" : "no"}`}>
-                    {result.flatFoldable ? "FLAT-FOLDABLE" : "NOT FLAT-FOLDABLE"}
+        {/* ---- Verdict ---- */}
+        <Reveal className="card verdict-card" delay={60}>
+          <h4>Verdict</h4>
+          {result && creases.length >= 2 ? (
+            <>
+              <div className="verdict">
+                <span className={`badge ${result.flatFoldable ? "yes" : "no"}`}>
+                  {result.flatFoldable ? "FLAT-FOLDABLE" : "NOT FLAT-FOLDABLE"}
+                </span>
+                <div className="chips">
+                  <span className={`chip ${result.kawasaki ? "pass" : "fail"}`}>
+                    Kawasaki {result.kawasaki ? "OK" : "✕"}
                   </span>
-                  <div className="chips">
-                    <span className={`chip ${result.kawasaki ? "pass" : "fail"}`}>
-                      Kawasaki {result.kawasaki ? "OK" : "X"}
-                    </span>
-                    <span
-                      className={`chip ${
-                        result.maekawa === null ? "skip" : result.maekawa ? "pass" : "fail"
-                      }`}
-                    >
-                      Maekawa {result.maekawa === null ? "—" : result.maekawa ? "OK" : "X"}
-                    </span>
-                    <span className="chip">alt sum {+result.alternatingSum.toFixed(3)}&deg;</span>
-                  </div>
+                  <span
+                    className={`chip ${
+                      result.maekawa === null ? "skip" : result.maekawa ? "pass" : "fail"
+                    }`}
+                  >
+                    Maekawa {result.maekawa === null ? "n/a" : result.maekawa ? "OK" : "✕"}
+                  </span>
+                  <span className="chip">alt sum {+result.alternatingSum.toFixed(3)}&deg;</span>
                 </div>
-                <ul className="reasons">
-                  {result.reasons.map((r, i) => (
-                    <li key={i}>{r}</li>
-                  ))}
-                </ul>
-              </>
-            ) : (
-              <p className="hint">Add at least two creases to analyze a vertex.</p>
-            )}
-          </div>
+              </div>
+              <ul className="reasons">
+                {result.reasons.map((r, i) => (
+                  <li key={i}>{r}</li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p className="hint">Add at least two creases to analyze a vertex.</p>
+          )}
+        </Reveal>
 
-          <div className={`card ${tourHighlight === "creases" ? "tour-highlight" : ""}`}>
-            <h2>Creases ({ordered.length})</h2>
+        {/* ---- Crease list + scope ---- */}
+        <div className="ledger">
+          <Reveal className="card creases-card" delay={60}>
+            <h4>Creases · {ordered.length}</h4>
             {ordered.map((c, i) => {
               const srcIdx = creases.findIndex(
                 (x) => normalizeDeg(x.angle) === normalizeDeg(c.angle) && x.assignment === c.assignment,
@@ -366,57 +424,28 @@ export function App() {
               );
             })}
             {ordered.length === 0 && <p className="hint">No creases. Click the disc or load a preset.</p>}
-          </div>
+          </Reveal>
 
-          <div className="card">
-            <h2>Scope</h2>
+          <Reveal className="card scope-card" delay={120}>
+            <h4>Scope · honesty</h4>
             <p className="scope-note">
               This certifies the <strong>necessary</strong> conditions for a{" "}
-              <code>single interior vertex</code>. A valid layer ordering (the big-little-big lemma)
-              is not yet checked, so a positive verdict means "satisfies Kawasaki, and Maekawa if
-              an assignment is given," not a proven fold. Global multi-vertex flat-foldability is{" "}
-              <strong>NP-hard</strong> (Bern &amp; Hayes, 1996) and is out of scope by design.
+              <code>single interior vertex</code>. A valid layer ordering (the big-little-big
+              lemma) isn't checked yet, so a positive verdict means "satisfies Kawasaki, and
+              Maekawa if an assignment is given", not a proven fold. Global multi-vertex
+              flat-foldability is <strong>NP-hard</strong> (Bern &amp; Hayes, 1996) and is out of
+              scope by design.
             </p>
-          </div>
+          </Reveal>
         </div>
-      </div>
-
-      {tourStep !== null && (
-        <div className="tour-card" role="dialog" aria-modal="false" aria-label="guided tour">
-          <button className="tour-close" onClick={() => setTourStep(null)} aria-label="close tour">
-            ✕
-          </button>
-          <h3>{TOUR_STEPS[tourStep].title}</h3>
-          <p>{TOUR_STEPS[tourStep].body}</p>
-          <div className="tour-dots">
-            {TOUR_STEPS.map((_, i) => (
-              <button
-                key={i}
-                className={`dot ${i === tourStep ? "active" : ""}`}
-                onClick={() => setTourStep(i)}
-                aria-label={`go to step ${i + 1}`}
-              />
-            ))}
-          </div>
-          <div className="tour-nav">
-            <button className="ghost" disabled={tourStep === 0} onClick={() => setTourStep(tourStep - 1)}>
-              Back
-            </button>
-            <span className="tour-count">
-              {tourStep + 1} / {TOUR_STEPS.length}
-            </span>
-            {tourStep < TOUR_STEPS.length - 1 ? (
-              <button onClick={() => setTourStep(tourStep + 1)}>Next</button>
-            ) : (
-              <button onClick={() => setTourStep(null)}>Done</button>
-            )}
-          </div>
-        </div>
-      )}
+      </section>
 
       <footer>
-        Reference Python implementation and tests live alongside this app. Two independent
-        implementations (TS + Python) agree on every verdict.
+        <span>折 · flat-foldability analyzer</span>
+        <span className="foot-note">
+          A TypeScript core and a Python reference implementation agree on every verdict. The
+          same test suite runs against both.
+        </span>
       </footer>
     </div>
   );

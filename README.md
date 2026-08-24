@@ -4,11 +4,11 @@ A flat-foldability analyzer for origami crease patterns.
 
 **P1 (current):** single-vertex flat-foldability via the two classical theorems.
 
-- **Kawasaki's theorem** — even crease count and zero alternating sum of sector angles (odd-index sectors and even-index sectors each total 180°).
-- **Maekawa's theorem** — for a given mountain/valley assignment, |M − V| = 2.
+- **Kawasaki's theorem** - even crease count and zero alternating sum of sector angles (odd-index sectors and even-index sectors each total 180°).
+- **Maekawa's theorem** - for a given mountain/valley assignment, |M − V| = 2.
 
 The analyzer returns a verdict plus human-readable reasons explaining *which*
-condition passed or failed — built so a forthcoming interactive simulator (P2)
+condition passed or failed - built so a forthcoming interactive simulator (P2)
 and the accompanying writeup can surface the "why."
 
 ## Scope and honesty about the boundary
@@ -67,15 +67,15 @@ npm run build    # static production build -> web/dist (deployable to Vercel / G
 
 ## Roadmap
 
-- [x] **P1** — single-vertex Kawasaki + Maekawa + tests (Python reference)
-- [x] **P2** — interactive crease-pattern analyzer (React + TS, static deploy)
-- [ ] **P2b** — 3D fold animation (Three.js), depends on layer ordering
-- [ ] **P3** — local layer ordering (big-little-big lemma); empirical study over generated patterns
-- [ ] **P4** — writeup + release polish
+- [x] **P1** - single-vertex Kawasaki + Maekawa + tests (Python reference)
+- [x] **P2** - interactive crease-pattern analyzer (React + TS, static deploy)
+- [x] **P2b** - 3D fold animation (Three.js / react-three-fiber): an accordion hinge-chain that pleats the sectors along the user's creases, mountain/valley driving fold direction. Illustrative fold - a *certified* layer ordering (needs P3) is still future work, and the UI says so.
+- [ ] **P3** - local layer ordering (big-little-big lemma); empirical study over generated patterns
+- [ ] **P4** - writeup + release polish
 
 ## References
 
 - T. Kawasaki, "On the relation between mountain-creases and valley-creases of a flat origami" (1989).
 - J. Maekawa, via T. Hull, "The combinatorics of flat folds: a survey."
-- M. Bern, B. Hayes, "The complexity of flat origami" (SODA 1996) — global flat-foldability is NP-hard.
+- M. Bern, B. Hayes, "The complexity of flat origami" (SODA 1996) - global flat-foldability is NP-hard.
 - E. Demaine, J. O'Rourke, *Geometric Folding Algorithms* (2007).
